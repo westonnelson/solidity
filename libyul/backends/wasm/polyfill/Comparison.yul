@@ -35,15 +35,12 @@ function iszero512(x1, x2, x3, x4, x5, x6, x7, x8) -> r:i32 {
 }
 
 function eq(x1, x2, x3, x4, y1, y2, y3, y4) -> r1, r2, r3, r4 {
-	if i64.eq(x1, y1) {
-		if i64.eq(x2, y2) {
-			if i64.eq(x3, y3) {
-				if i64.eq(x4, y4) {
-					r4 := 1
-				}
-			}
-		}
-	}
+//	r4 := i32.and(i64.eq(x1, y1), i32.and(i64.eq(x2, y2), i32.and(i64.eq(x3, y3), i64.eq(x4, y4))))
+	if i64.ne(x1, y1) { leave }
+	if i64.ne(x2, y2) { leave }
+	if i64.ne(x3, y3) { leave }
+	if i64.ne(x4, y4) { leave }
+	r4 := 1
 }
 
 // returns 0 if a == b, -1 if a < b and 1 if a > b
