@@ -502,6 +502,35 @@ void CHC::endVisit(IndexRangeAccess const& _range)
 	m_context.addAssertion(sliceArray->length() == end - start);
 }
 
+void CHC::endVisit(Return const& _return)
+{
+	SMTEncoder::endVisit(_return);
+
+	auto const& returnDest = *m_returnDests.back();
+	connectBlocks(m_currentBlock, predicate(returnDest));
+
+	auto returnGhost = createBlock(&_return, PredicateType::FunctionBlock, "return_ghost_");
+	m_currentBlock = predicate(*returnGhost);
+}
+
+void CHC::pushInlineFrame(CallableDeclaration const* _callable)
+{
+	auto type = dynamic_cast<FunctionDefinition const*>(_callable) ?
+		PredicateType::FunctionSummary :
+		PredicateType::FunctionBlock;
+	m_returnDests.push_back(createBlock(_callable, type, "return_"));
+}
+
+void CHC::popInlineFrame(CallableDeclaration const* _callable)
+{
+	solAssert(!m_returnDests.empty(), "");
+	auto const& ret = *m_returnDests.back();
+	solAssert(ret.programNode() == _callable, "");
+	connectBlocks(m_currentBlock, predicate(ret));
+	setCurrentBlock(ret);
+	m_returnDests.pop_back();
+}
+
 void CHC::visitAssert(FunctionCall const& _funCall)
 {
 	auto const& args = _funCall.arguments();
@@ -706,6 +735,7 @@ void CHC::resetContractAnalysis()
 	m_unknownFunctionCallSeen = false;
 	m_breakDest = nullptr;
 	m_continueDest = nullptr;
+	m_returnDests.clear();
 	errorFlag().resetIndex();
 }
 

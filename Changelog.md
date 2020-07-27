@@ -3,6 +3,7 @@
 Compiler Features:
  * SMTChecker: Add division by zero checks in the CHC engine.
  * SMTChecker: Support ``selector`` for expressions with value known at compile-time.
+ * SMTChecker: Support early returns in the CHC engine.
 
 
 Bugfixes:
@@ -123,6 +124,7 @@ Compiler Features:
  * Standard JSON Interface: Do not run EVM bytecode code generation, if only Yul IR or EWasm output is requested.
  * Yul Optimizer: LoopInvariantCodeMotion can move reading operations outside for-loops as long as the affected area is not modified inside the loop.
  * Yul: Report error when using non-string literals for ``datasize()``, ``dataoffset()``, ``linkersymbol()``, ``loadimmutable()``, ``setimmutable()``.
+
 
 Bugfixes:
  * AST: Remove ``null`` member values also when the compiler is used in standard-json-mode.

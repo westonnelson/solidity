@@ -82,6 +82,10 @@ private:
 	void endVisit(Break const& _node) override;
 	void endVisit(Continue const& _node) override;
 	void endVisit(IndexRangeAccess const& _node) override;
+	void endVisit(Return const& _node) override;
+
+	void pushInlineFrame(CallableDeclaration const* _callable) override;
+	void popInlineFrame(CallableDeclaration const* _callable) override;
 
 	void visitAssert(FunctionCall const& _funCall);
 	void visitAddMulMod(FunctionCall const& _funCall) override;
@@ -317,9 +321,11 @@ private:
 	bool m_unknownFunctionCallSeen = false;
 
 	/// Block where a loop break should go to.
-	Predicate const* m_breakDest;
+	Predicate const* m_breakDest = nullptr;
 	/// Block where a loop continue should go to.
-	Predicate const* m_continueDest;
+	Predicate const* m_continueDest = nullptr;
+
+	std::vector<Predicate const*> m_returnDests;
 	//@}
 
 	/// CHC solver.

@@ -112,6 +112,9 @@ protected:
 	void endVisit(Continue const&) override {}
 	bool visit(TryCatchClause const& _node) override;
 
+	virtual void pushInlineFrame(CallableDeclaration const*) {}
+	virtual void popInlineFrame(CallableDeclaration const*) {}
+
 	/// Do not visit subtree if node is a RationalNumber.
 	/// Symbolic _expr is the rational literal.
 	bool shortcutRationalNumber(Expression const& _expr);
@@ -344,6 +347,8 @@ protected:
 	std::map<ContractDefinition const*, ModifierInvocation const*> m_baseConstructorCalls;
 
 	ContractDefinition const* m_currentContract = nullptr;
+
+	CallableDeclaration const* m_currentCallable = nullptr;
 
 	/// Stores the context of the encoding.
 	smt::EncodingContext& m_context;
