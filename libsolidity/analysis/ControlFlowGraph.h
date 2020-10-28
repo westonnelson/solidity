@@ -119,7 +119,7 @@ struct FunctionFlow
 	/// (e.g. all return statements of the function).
 	CFGNode* exit = nullptr;
 	/// Revert node. Control flow of the function in case of revert.
-	/// This node is empty does not have any exits, but may have multiple entries
+	/// This node is empty and does not have any exits, but may have multiple entries
 	/// (e.g. all assert, require, revert and throw statements).
 	CFGNode* revert = nullptr;
 	/// Transaction return node. Destination node for inline assembly "return" calls.
@@ -136,8 +136,9 @@ public:
 	bool constructFlow(ASTNode const& _astRoot);
 
 	bool visit(FunctionDefinition const& _function) override;
+	bool visit(ContractDefinition const& _contract) override;
 
-	FunctionFlow const& functionFlow(FunctionDefinition const& _function) const;
+	FunctionFlow const& functionFlow(ContractDefinition const& _contract, FunctionDefinition const& _function) const;
 
 	class NodeContainer
 	{
@@ -154,7 +155,7 @@ private:
 	/// are owned by the CFG class and stored in this container.
 	NodeContainer m_nodeContainer;
 
-	std::map<FunctionDefinition const*, std::unique_ptr<FunctionFlow>> m_functionControlFlow;
+	std::map<std::pair<ContractDefinition const*, FunctionDefinition const*>, std::unique_ptr<FunctionFlow>> m_functionControlFlow;
 };
 
 }

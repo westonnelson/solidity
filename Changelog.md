@@ -20,6 +20,7 @@ Bugfixes:
  * SMTChecker: Fix internal error in the BMC engine when inherited contract from a different source unit has private state variables.
  * SMTChecker: Fix internal error when ``array.push()`` is used as the LHS of an assignment.
  * Code generator: Fix missing creation dependency tracking for abstract contracts.
+ * Control Flow Graph: Remove wrong warning when a function has branches that always revert.
 
 
 ### 0.7.4 (2020-10-19)
