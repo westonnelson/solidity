@@ -257,7 +257,11 @@ Expression Parser::parseExpression()
 			return parseCall(std::move(operation));
 		auto identifier = std::get<Identifier>(operation);
 		if (m_dialect.builtin(identifier.name))
-			fatalParserError(7104_error, "Builtin function \"" + identifier.name.str() + "\" must be called.");
+			fatalParserError(
+				7104_error,
+				identifier.location,
+				"Builtin function \"" + identifier.name.str() + "\" must be called."
+			);
 		return identifier;
 	}
 	else
