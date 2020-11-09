@@ -141,12 +141,12 @@ optional<vector<VariableDeclaration const*>> Predicate::stateVariables() const
 
 bool Predicate::isSummary() const
 {
-	return functor().name.rfind("summary", 0) == 0;
+	return m_type == PredicateType::ConstructorSummary || m_type == PredicateType::FunctionSummary;
 }
 
 bool Predicate::isInterface() const
 {
-	return functor().name.rfind("interface", 0) == 0;
+	return m_type == PredicateType::Interface;
 }
 
 string Predicate::formatSummaryCall(vector<smtutil::Expression> const& _args) const

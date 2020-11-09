@@ -74,6 +74,8 @@ private:
 	//@{
 	bool visit(ContractDefinition const& _node) override;
 	void endVisit(ContractDefinition const& _node) override;
+	std::map<ContractDefinition const*, std::vector<ASTPointer<frontend::Expression>>> baseArguments(ContractDefinition const& _contract);
+	void defineContractInitializer(ContractDefinition const& _contract);
 	bool visit(FunctionDefinition const& _node) override;
 	void endVisit(FunctionDefinition const& _node) override;
 	bool visit(IfStatement const& _node) override;
@@ -160,6 +162,8 @@ private:
 	smtutil::Expression predicate(Predicate const& _block);
 	/// @returns the summary predicate for the called function.
 	smtutil::Expression predicate(FunctionCall const& _funCall);
+	/// @returns a predicate that defines a contract initializer.
+	smtutil::Expression initializer(ContractDefinition const& _contract);
 	/// @returns a predicate that defines a constructor summary.
 	smtutil::Expression summary(ContractDefinition const& _contract);
 	/// @returns a predicate that defines a function summary.
@@ -231,10 +235,6 @@ private:
 
 	/// Predicates.
 	//@{
-	/// Constructor summary predicate, exists after the constructor
-	/// (implicit or explicit) and before the interface.
-	Predicate const* m_constructorSummaryPredicate = nullptr;
-
 	/// Artificial Interface predicate.
 	/// Single entry block for all functions.
 	std::map<ContractDefinition const*, Predicate const*> m_interfaces;
@@ -244,6 +244,9 @@ private:
 	/// which means that the analyzed contract can potentially be called
 	/// nondeterministically.
 	std::map<ContractDefinition const*, Predicate const*> m_nondetInterfaces;
+
+	std::map<ContractDefinition const*, Predicate const*> m_constructorSummaries;
+	std::map<ContractDefinition const*, Predicate const*> m_contractInitializers;
 
 	/// Artificial Error predicate.
 	/// Single error block for all assertions.

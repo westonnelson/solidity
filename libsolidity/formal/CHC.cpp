@@ -112,20 +112,11 @@ vector<string> CHC::unhandledQueries() const
 bool CHC::visit(ContractDefinition const& _contract)
 {
 	resetContractAnalysis();
-
 	initContract(_contract);
-
-	m_stateVariables = SMTEncoder::stateVariablesIncludingInheritedAndPrivate(_contract);
-
 	clearIndices(&_contract);
 
+	m_stateVariables = SMTEncoder::stateVariablesIncludingInheritedAndPrivate(_contract);
 	solAssert(m_currentContract, "");
-	m_constructorSummaryPredicate = createSymbolicBlock(
-		constructorSort(*m_currentContract, state()),
-		"summary_constructor_" + contractSuffix(_contract),
-		PredicateType::ConstructorSummary,
-		&_contract
-	);
 
 	SMTEncoder::visit(_contract);
 	return false;
@@ -133,31 +124,159 @@ bool CHC::visit(ContractDefinition const& _contract)
 
 void CHC::endVisit(ContractDefinition const& _contract)
 {
-	auto implicitConstructorPredicate = createSymbolicBlock(
-		implicitConstructorSort(state()),
-		"implicit_constructor_" + contractSuffix(_contract),
-		PredicateType::ImplicitConstructor,
-		&_contract
-	);
-	addRule(
-		(*implicitConstructorPredicate)({0, state().thisAddress(), state().crypto(), state().tx(), state().state()}),
-		implicitConstructorPredicate->functor().name
-	);
-	setCurrentBlock(*implicitConstructorPredicate);
-
 	if (auto constructor = _contract.constructor())
 		constructor->accept(*this);
-	else
-		inlineConstructorHierarchy(_contract);
+
+	defineContractInitializer(_contract);
+
+	auto const& entry = *createSymbolicBlock(
+		constructorSort(_contract, state()),
+		"implicit_constructor_entry_" + contractSuffix(_contract) + "_" + uniquePrefix(),
+		PredicateType::ConstructorSummary,
+		&_contract
+	);
+
+	smtutil::Expression preConstraints = state().state() == state().state(0);
+	for (auto var: stateVariablesIncludingInheritedAndPrivate(_contract))
+		preConstraints = preConstraints && m_context.variable(*var)->valueAtIndex(0) == currentValue(*var);
+	if (auto constructor = _contract.constructor())
+		for (auto var: constructor->parameters())
+			preConstraints = preConstraints && m_context.variable(*var)->valueAtIndex(0) == currentValue(*var);
+	preConstraints = preConstraints && errorFlag().currentValue() == 0;
+	m_context.addAssertion(preConstraints);
+
+	addRule(smtutil::Expression::implies(preConstraints, predicate(entry)), entry.functor().name);
+	setCurrentBlock(entry);
+
+	auto baseArgs = baseArguments(_contract);
+	//cout << "Checking base args for contract " << _contract.name() << endl;
+	//for (auto const& [contract, args]: baseArgs)
+	//	cout << "Contract " << contract->name() << " has " << args.size() << " args" << endl;
+	for (auto base: _contract.annotation().linearizedBaseContracts | boost::adaptors::reversed)
+	{
+		if (base != &_contract)
+		{
+			m_callGraph[&_contract].insert(base);
+			vector<ASTPointer<Expression>> const& args = baseArgs.count(base) ? baseArgs.at(base) : decltype(args){};
+
+			auto baseConstructor = base->constructor();
+			if (baseConstructor && !args.empty())
+			{
+				auto const& params = baseConstructor->parameters();
+				solAssert(params.size() == args.size(), "");
+				for (unsigned i = 0; i < params.size(); ++i)
+					if (params.at(i))
+					{
+						args.at(i)->accept(*this);
+						solAssert(m_context.knownVariable(*params.at(i)), "");
+						m_context.addAssertion(currentValue(*params.at(i)) == expr(*args.at(i)));
+					}
+			}
+		}
+
+		errorFlag().increaseIndex();
+		m_context.addAssertion(smt::constructorCall(*m_contractInitializers.at(base), m_context));
+		connectBlocks(m_currentBlock, summary(_contract), errorFlag().currentValue() > 0);
+		m_context.addAssertion(errorFlag().currentValue() == 0);
+
+		auto const& afterBase = *createSymbolicBlock(
+			constructorSort(_contract, state()),
+			"implicit_constructor_" + contractSuffix(_contract) + "_after_base_" + base->name() + "_" + to_string(base->id()) + "_" + uniquePrefix(),
+			PredicateType::ConstructorSummary,
+			&_contract
+		);
+
+		connectBlocks(m_currentBlock, predicate(afterBase));
+		setCurrentBlock(afterBase);
+	}
 
 	connectBlocks(m_currentBlock, summary(_contract));
 
-	setCurrentBlock(*m_constructorSummaryPredicate);
-
+	setCurrentBlock(*m_constructorSummaries.at(&_contract));
 	m_queryPlaceholders[&_contract].push_back({smtutil::Expression(true), errorFlag().currentValue(), m_currentBlock});
 	connectBlocks(m_currentBlock, interface(), errorFlag().currentValue() == 0);
 
 	SMTEncoder::endVisit(_contract);
+}
+
+void CHC::defineContractInitializer(ContractDefinition const& _contract)
+{
+	//THIS THING HERE NEEDS TO BE A NONLINEAR CLAUSE
+	//constructor(...) THAT INITIALIZES ITS STATE VARIABLES
+	//AND RUNS THE CONSTRUCTOR CODE, IF AVAILABLE
+	auto const& implicitConstructorPredicate = *createSymbolicBlock(
+		constructorSort(_contract, state()),
+		"contract_initializer_entry_" + contractSuffix(_contract) + "_" + uniquePrefix(),
+		PredicateType::ConstructorSummary,
+		&_contract
+	);
+
+	smtutil::Expression preConstraints = state().state() == state().state(0);
+	for (auto var: stateVariablesIncludingInheritedAndPrivate(_contract))
+		preConstraints = preConstraints && m_context.variable(*var)->valueAtIndex(0) == currentValue(*var);
+	if (auto constructor = _contract.constructor())
+		for (auto var: constructor->parameters())
+			preConstraints = preConstraints && m_context.variable(*var)->valueAtIndex(0) == currentValue(*var);
+	preConstraints = preConstraints && errorFlag().currentValue() == 0;
+	m_context.addAssertion(preConstraints);
+
+	auto implicitFact = smt::constructor(implicitConstructorPredicate, m_context);
+	//connectBlocks(m_currentBlock, implicitFact);
+	addRule(smtutil::Expression::implies(preConstraints, implicitFact), implicitFact.name);
+	setCurrentBlock(implicitConstructorPredicate);
+
+	for (auto var: _contract.stateVariables())
+		m_context.variable(*var)->increaseIndex();
+	initializeStateVariables(_contract);
+	auto const& afterInit = *createSymbolicBlock(
+		constructorSort(_contract, state()),
+		"contract_initializer_after_init_" + contractSuffix(_contract) + "_" + uniquePrefix(),
+		PredicateType::ConstructorSummary,
+		&_contract
+	);
+	connectBlocks(m_currentBlock, predicate(afterInit));
+	setCurrentBlock(afterInit);
+
+	if (auto constructor = _contract.constructor())
+	{
+		errorFlag().increaseIndex();
+		m_context.addAssertion(smt::functionCall(*m_summaries.at(&_contract).at(constructor), &_contract, m_context));
+		connectBlocks(m_currentBlock, initializer(_contract), errorFlag().currentValue() > 0);
+		m_context.addAssertion(errorFlag().currentValue() == 0);
+	}
+
+	connectBlocks(m_currentBlock, initializer(_contract));
+}
+
+map<ContractDefinition const*, vector<ASTPointer<frontend::Expression>>> CHC::baseArguments(ContractDefinition const& _contract)
+{
+	map<ContractDefinition const*, vector<ASTPointer<Expression>>> baseArgs;
+
+	for (auto contract: _contract.annotation().linearizedBaseContracts)
+	{
+		/// Collect base contracts and potential constructor arguments.
+		for (auto inh: contract->baseContracts())
+		{
+			solAssert(inh, "");
+			auto const& base = dynamic_cast<ContractDefinition const&>(*inh->name().annotation().referencedDeclaration);
+			if (auto args = inh->arguments())
+				baseArgs[&base] = *args;
+		}
+		/// Collect base constructor arguments given as constructor modifiers.
+		if (auto constructor = contract->constructor())
+			for (auto mod: constructor->modifiers())
+			{
+				auto decl = mod->name()->annotation().referencedDeclaration;
+				if (auto base = dynamic_cast<ContractDefinition const*>(decl))
+				{
+					solAssert(!baseArgs.count(base), "");
+					if (auto args = mod->arguments())
+						baseArgs[base] = *args;
+				}
+			}
+	}
+
+	return baseArgs;
 }
 
 bool CHC::visit(FunctionDefinition const& _function)
@@ -168,16 +287,7 @@ bool CHC::visit(FunctionDefinition const& _function)
 		return false;
 	}
 
-	// This is the case for base constructor inlining.
-	if (m_currentFunction)
-	{
-		solAssert(m_currentFunction->isConstructor(), "");
-		solAssert(_function.isConstructor(), "");
-		solAssert(_function.scope() != m_currentContract, "");
-		SMTEncoder::visit(_function);
-		return false;
-	}
-
+	// No inlining.
 	solAssert(!m_currentFunction, "Function inlining should not happen in CHC.");
 	m_currentFunction = &_function;
 
@@ -189,15 +299,12 @@ bool CHC::visit(FunctionDefinition const& _function)
 	auto functionPred = predicate(*functionEntryBlock);
 	auto bodyPred = predicate(*bodyBlock);
 
-	if (_function.isConstructor())
-		connectBlocks(m_currentBlock, functionPred);
-	else
-		addRule(functionPred, functionPred.name);
+	addRule(functionPred, functionPred.name);
 
+	for (auto const& var: _function.parameters())
+		m_context.addAssertion(m_context.variable(*var)->valueAtIndex(0) == currentValue(*var));
 	m_context.addAssertion(errorFlag().currentValue() == 0);
 	for (auto const* var: m_stateVariables)
-		m_context.addAssertion(m_context.variable(*var)->valueAtIndex(0) == currentValue(*var));
-	for (auto const& var: _function.parameters())
 		m_context.addAssertion(m_context.variable(*var)->valueAtIndex(0) == currentValue(*var));
 	m_context.addAssertion(state().state(0) == state().state());
 
@@ -216,54 +323,35 @@ void CHC::endVisit(FunctionDefinition const& _function)
 		return;
 
 	solAssert(m_currentFunction && m_currentContract, "");
+	// No inlining.
+	solAssert(m_currentFunction == &_function, "");
 
-	// This is the case for base constructor inlining.
-	if (m_currentFunction != &_function)
+	//auto assertionError = errorFlag().currentValue();
+	//auto sum = summary(_function);
+	//auto iface = interface();
+	connectBlocks(m_currentBlock, summary(_function));
+	setCurrentBlock(*m_summaries.at(m_currentContract).at(&_function));
+
+	// Query placeholders for constructors are not created here because
+	// of contracts without constructors.
+	// Instead, those are created in endVisit(ContractDefinition).
+	if (!_function.isConstructor())
 	{
-		solAssert(m_currentFunction && m_currentFunction->isConstructor(), "");
-		solAssert(_function.isConstructor(), "");
-		solAssert(_function.scope() != m_currentContract, "");
-	}
-	else
-	{
-		// We create an extra exit block for constructors that simply
-		// connects to the interface in case an explicit constructor
-		// exists in the hierarchy.
-		// It is not connected directly here, as normal functions are,
-		// because of the case where there are only implicit constructors.
-		// This is done in endVisit(ContractDefinition).
-		if (_function.isConstructor())
-		{
-			string suffix = m_currentContract->name() + "_" + to_string(m_currentContract->id());
-			solAssert(m_currentContract, "");
-			auto constructorExit = createSymbolicBlock(
-				constructorSort(*m_currentContract, state()),
-				"constructor_exit_" + suffix,
-				PredicateType::ConstructorSummary,
-				m_currentContract
-			);
-			connectBlocks(m_currentBlock, predicate(*constructorExit));
+		//setCurrentBlock(*m_interfaces.at(m_currentContract));
 
-			setCurrentBlock(*constructorExit);
-		}
-		else
+		auto assertionError = errorFlag().currentValue();
+		auto sum = summary(_function);
+		auto iface = interface();
+		auto ifacePre = smt::interfacePre(*m_interfaces.at(m_currentContract), *m_currentContract, m_context);
+		if (_function.isPublic())
 		{
-			auto assertionError = errorFlag().currentValue();
-			auto sum = summary(_function);
-			connectBlocks(m_currentBlock, sum);
-			auto iface = interface();
-			setCurrentBlock(*m_interfaces.at(m_currentContract));
-
-			auto ifacePre = smt::interfacePre(*m_interfaces.at(m_currentContract), *m_currentContract, m_context);
-			if (_function.isPublic())
-			{
-				auto txConstraints = m_context.state().txConstraints(_function);
-				m_queryPlaceholders[&_function].push_back({txConstraints && sum, assertionError, ifacePre});
-				connectBlocks(ifacePre, iface, txConstraints && sum && (assertionError == 0));
-			}
+			auto txConstraints = m_context.state().txConstraints(_function);
+			m_queryPlaceholders[&_function].push_back({txConstraints && sum, assertionError, ifacePre});
+			connectBlocks(ifacePre, iface, txConstraints && sum && (assertionError == 0));
 		}
-		m_currentFunction = nullptr;
 	}
+
+	m_currentFunction = nullptr;
 
 	SMTEncoder::endVisit(_function);
 }
@@ -566,8 +654,8 @@ void CHC::internalFunctionCall(FunctionCall const& _funCall)
 
 	connectBlocks(
 		m_currentBlock,
-		(m_currentFunction && !m_currentFunction->isConstructor()) ? summary(*m_currentFunction) : summary(*m_currentContract),
-		(errorFlag().currentValue() > 0)
+		m_currentFunction ? summary(*m_currentFunction) : summary(*m_currentContract),
+		errorFlag().currentValue() > 0
 	);
 	m_context.addAssertion(errorFlag().currentValue() == 0);
 }
@@ -728,6 +816,8 @@ void CHC::resetSourceAnalysis()
 	m_summaries.clear();
 	m_interfaces.clear();
 	m_nondetInterfaces.clear();
+	m_constructorSummaries.clear();
+	m_contractInitializers.clear();
 	Predicate::reset();
 	ArraySlicePredicate::reset();
 	m_blockCounter = 0;
@@ -840,6 +930,18 @@ void CHC::defineInterfacesAndSummaries(SourceUnit const& _source)
 			string suffix = contract->name() + "_" + to_string(contract->id());
 			m_interfaces[contract] = createSymbolicBlock(interfaceSort(*contract, state()), "interface_" + suffix, PredicateType::Interface, contract);
 			m_nondetInterfaces[contract] = createSymbolicBlock(nondetInterfaceSort(*contract, state()), "nondet_interface_" + suffix, PredicateType::NondetInterface, contract);
+			m_constructorSummaries[contract] = createSymbolicBlock(
+				constructorSort(*contract, state()),
+				"summary_constructor_" + contractSuffix(*contract),
+				PredicateType::ConstructorSummary,
+				contract
+			);
+			m_contractInitializers[contract] = createSymbolicBlock(
+				constructorSort(*contract, state()),
+				"contract_initializer_" + contractSuffix(*contract),
+				PredicateType::ConstructorSummary,
+				contract
+			);
 
 			for (auto const* var: stateVariablesIncludingInheritedAndPrivate(*contract))
 				if (!m_context.knownVariable(*var))
@@ -911,14 +1013,19 @@ smtutil::Expression CHC::error(unsigned _idx)
 	return m_errorPredicate->functor(_idx)({});
 }
 
+smtutil::Expression CHC::initializer(ContractDefinition const& _contract)
+{
+	return predicate(*m_contractInitializers.at(&_contract));
+}
+
 smtutil::Expression CHC::summary(ContractDefinition const& _contract)
 {
-	return constructor(*m_constructorSummaryPredicate, _contract, m_context);
+	return predicate(*m_constructorSummaries.at(&_contract));
 }
 
 smtutil::Expression CHC::summary(FunctionDefinition const& _function, ContractDefinition const& _contract)
 {
-	return smt::function(*m_summaries.at(&_contract).at(&_function), _function, &_contract, m_context);
+	return smt::function(*m_summaries.at(&_contract).at(&_function), &_contract, m_context);
 }
 
 smtutil::Expression CHC::summary(FunctionDefinition const& _function)
@@ -1022,15 +1129,12 @@ smtutil::Expression CHC::predicate(Predicate const& _block)
 		solAssert(m_currentContract, "");
 		return ::interface(_block, *m_currentContract, m_context);
 	case PredicateType::ImplicitConstructor:
-		solAssert(m_currentContract, "");
-		return implicitConstructor(_block, *m_currentContract, m_context);
+		return implicitConstructor(_block, m_context);
 	case PredicateType::ConstructorSummary:
-		solAssert(m_currentContract, "");
-		return constructor(_block, *m_currentContract, m_context);
+		return constructor(_block, m_context);
 	case PredicateType::FunctionEntry:
 	case PredicateType::FunctionSummary:
-		solAssert(m_currentFunction, "");
-		return smt::function(_block, *m_currentFunction, m_currentContract, m_context);
+		return smt::function(_block, m_currentContract, m_context);
 	case PredicateType::FunctionBlock:
 		solAssert(m_currentFunction, "");
 		return functionBlock(_block, *m_currentFunction, m_currentContract, m_context);
@@ -1175,7 +1279,7 @@ void CHC::verificationTargetEncountered(
 	// create an error edge to the summary
 	connectBlocks(
 		m_currentBlock,
-		scopeIsFunction ? summary(*m_currentFunction) : summary(*m_currentContract),
+		m_currentFunction ? summary(*m_currentFunction) : summary(*m_currentContract),
 		currentPathConditions() && _errorCondition && errorFlag().currentValue() == errorId
 	);
 
@@ -1416,16 +1520,12 @@ optional<string> CHC::generateCounterexample(CHCSolverInterface::CexGraph const&
 		string txCex = summaryPredicate->formatSummaryCall(summaryArgs);
 		path.emplace_back(txCex);
 
-		/// Recurse on the next interface node which represents the previous transaction
-		/// or stop.
-		if (interfaceId)
-		{
-			Predicate const* interfacePredicate = Predicate::predicate(_graph.nodes.at(*interfaceId).name);
-			solAssert(interfacePredicate && interfacePredicate->isInterface(), "");
-			node = *interfaceId;
-		}
-		else
+		/// Stop when we reach the summary of the analyzed constructor.
+		if (summaryPredicate->type() == PredicateType::ConstructorSummary)
 			break;
+
+		/// Recurse on the next interface node which represents the previous transaction.
+		node = *interfaceId;
 	}
 
 	return localState + "\nTransaction trace:\n" + boost::algorithm::join(boost::adaptors::reverse(path), "\n");

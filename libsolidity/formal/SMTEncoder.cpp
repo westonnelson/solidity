@@ -131,9 +131,6 @@ bool SMTEncoder::visit(FunctionDefinition const& _function)
 {
 	m_modifierDepthStack.push_back(-1);
 
-	if (_function.isConstructor())
-		inlineConstructorHierarchy(dynamic_cast<ContractDefinition const&>(*_function.scope()));
-
 	initializeLocalVariables(_function);
 
 	_function.parameterList().accept(*this);

@@ -41,11 +41,13 @@ namespace solidity::frontend::smt
  *
  * 3. Implicit constructor
  * The implicit constructor of a contract, that is, without input parameters. Signature:
- * implicit_constructor(error, this, cryptoFunctions, txData, blockchainState).
+ * implicit_constructor(error, this, cryptoFunctions, txData, blockchainState, stateVariables).
  *
  * 4. Constructor entry/summary
- * The summary of an implicit constructor. Signature:
- * constructor_summary(error, this, cryptoFunctions, txData, blockchainState, blockchainState', stateVariables').
+ * The summary of a contract's deployment procedure.
+ * Signature:
+ * If the contract has a constructor function, this is the same as the summary of that function. Otherwise:
+ * constructor_summary(error, this, cryptoFunctions, txData, blockchainState, blockchainState', stateVariables, stateVariables').
  *
  * 5. Function entry/summary
  * The entry point of a function definition. Signature:
@@ -63,7 +65,7 @@ smtutil::SortPointer interfaceSort(ContractDefinition const& _contract, Symbolic
 smtutil::SortPointer nondetInterfaceSort(ContractDefinition const& _contract, SymbolicState& _state);
 
 /// @returns the implicit constructor predicate sort.
-smtutil::SortPointer implicitConstructorSort(SymbolicState& _state);
+smtutil::SortPointer implicitConstructorSort(ContractDefinition const& _contract, SymbolicState& _state);
 
 /// @returns the constructor entry/summary predicate sort for _contract.
 smtutil::SortPointer constructorSort(ContractDefinition const& _contract, SymbolicState& _state);
