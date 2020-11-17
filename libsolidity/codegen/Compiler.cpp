@@ -65,3 +65,10 @@ evmasm::AssemblyItem Compiler::functionEntryLabel(FunctionDefinition const& _fun
 {
 	return m_runtimeContext.functionEntryLabelIfExists(_function);
 }
+
+evmasm::LinkerObject const& Compiler::assembledObject() const
+{
+	evmasm::LinkerObject const& object = assembly().assemble();
+	solAssert(object.immutableReferences.empty(), "Leftover immutables.");
+	return object;
+}

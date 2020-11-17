@@ -287,9 +287,6 @@ public:
 	/// Should be avoided except when adding sub-assemblies.
 	std::shared_ptr<evmasm::Assembly> assemblyPtr() const { return m_asm; }
 
-	evmasm::LinkerObject const& assembledObject() const;
-	evmasm::LinkerObject const& assembledRuntimeObject(size_t _subIndex) const { return m_asm->sub(_subIndex).assemble(); }
-
 	/**
 	 * Helper class to pop the visited nodes stack when a scope closes
 	 */

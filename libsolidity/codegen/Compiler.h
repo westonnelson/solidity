@@ -58,9 +58,9 @@ public:
 	/// @returns Runtime assembly as a shared pointer.
 	std::shared_ptr<evmasm::Assembly> runtimeAssemblyPtr() const;
 	/// @returns The entire assembled object (with constructor).
-	evmasm::LinkerObject assembledObject() const { return m_context.assembledObject(); }
+	evmasm::LinkerObject const& assembledObject() const;
 	/// @returns Only the runtime object (without constructor).
-	evmasm::LinkerObject runtimeObject() const { return m_context.assembledRuntimeObject(m_runtimeSub); }
+	evmasm::LinkerObject const& runtimeObject() const { return runtimeAssembly().assemble(); }
 
 	std::string generatedYulUtilityCode() const { return m_context.generatedYulUtilityCode(); }
 	std::string runtimeGeneratedYulUtilityCode() const { return m_runtimeContext.generatedYulUtilityCode(); }
