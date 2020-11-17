@@ -61,20 +61,6 @@ public:
 	evmasm::LinkerObject assembledObject() const { return m_context.assembledObject(); }
 	/// @returns Only the runtime object (without constructor).
 	evmasm::LinkerObject runtimeObject() const { return m_context.assembledRuntimeObject(m_runtimeSub); }
-	/// @arg _sourceCodes is the map of input files to source code strings
-	std::string assemblyString(StringMap const& _sourceCodes = StringMap()) const
-	{
-		return assembly().assemblyString(_sourceCodes);
-	}
-	/// @arg _sourceCodes is the map of input files to source code strings
-	Json::Value assemblyJSON(std::map<std::string, unsigned> const& _indices = std::map<std::string, unsigned>()) const
-	{
-		return assembly().assemblyJSON(_indices);
-	}
-	/// @returns Assembly items of the normal compiler context
-	evmasm::AssemblyItems const& assemblyItems() const { return assembly().items(); }
-	/// @returns Assembly items of the runtime compiler context
-	evmasm::AssemblyItems const& runtimeAssemblyItems() const { return runtimeAssembly().items(); }
 
 	std::string generatedYulUtilityCode() const { return m_context.generatedYulUtilityCode(); }
 	std::string runtimeGeneratedYulUtilityCode() const { return m_runtimeContext.generatedYulUtilityCode(); }
