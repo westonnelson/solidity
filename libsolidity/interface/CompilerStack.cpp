@@ -1202,7 +1202,8 @@ void CompilerStack::compileContract(
 	try
 	{
 		// Assemble deployment (incl. runtime)  object.
-		compiledContract.object = compiler->assembledObject();
+		compiledContract.object = compiler->assembly().assemble();
+		solAssert(compiledContract.object.immutableReferences.empty(), "Leftover immutables.");
 	}
 	catch(evmasm::AssemblyException const&)
 	{
@@ -1212,7 +1213,7 @@ void CompilerStack::compileContract(
 	try
 	{
 		// Assemble runtime object.
-		compiledContract.runtimeObject = compiler->runtimeObject();
+		compiledContract.runtimeObject = compiler->runtimeAssembly().assemble();
 	}
 	catch(evmasm::AssemblyException const&)
 	{
