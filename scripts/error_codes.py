@@ -228,7 +228,7 @@ def examine_id_coverage(top_dir, source_id_to_file_names, new_ids_only=False):
         "5622", "6272", "7128", "7186",
         "7589", "7593", "7653", "7885", "8065", "8084", "8140",
         "8312", "8592", "9011",
-        "9085", "9390", "9551",
+        "9085", "9390", "9551", "9609",
     }
 
     new_source_only_ids = source_only_ids - old_source_only_ids
