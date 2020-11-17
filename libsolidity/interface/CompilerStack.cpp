@@ -626,7 +626,7 @@ evmasm::AssemblyItems const* CompilerStack::assemblyItems(string const& _contrac
 		BOOST_THROW_EXCEPTION(CompilerError() << errinfo_comment("Compilation was not successful."));
 
 	Contract const& currentContract = contract(_contractName);
-	return currentContract.compiler ? &contract(_contractName).compiler->assembly()->items() : nullptr;
+	return currentContract.compiler ? &contract(_contractName).evmAssembly->items() : nullptr;
 }
 
 evmasm::AssemblyItems const* CompilerStack::runtimeAssemblyItems(string const& _contractName) const
@@ -635,7 +635,7 @@ evmasm::AssemblyItems const* CompilerStack::runtimeAssemblyItems(string const& _
 		BOOST_THROW_EXCEPTION(CompilerError() << errinfo_comment("Compilation was not successful."));
 
 	Contract const& currentContract = contract(_contractName);
-	return currentContract.compiler ? &contract(_contractName).compiler->runtimeAssembly()->items() : nullptr;
+	return currentContract.compiler ? &contract(_contractName).evmRuntimeAssembly->items() : nullptr;
 }
 
 Json::Value CompilerStack::generatedSources(string const& _contractName, bool _runtime) const
@@ -790,7 +790,7 @@ string CompilerStack::assemblyString(string const& _contractName, StringMap _sou
 
 	Contract const& currentContract = contract(_contractName);
 	if (currentContract.compiler)
-		return currentContract.compiler->assembly().assemblyString(_sourceCodes);
+		return currentContract.evmAssembly->assemblyString(_sourceCodes);
 	else
 		return string();
 }
@@ -803,7 +803,7 @@ Json::Value CompilerStack::assemblyJSON(string const& _contractName) const
 
 	Contract const& currentContract = contract(_contractName);
 	if (currentContract.compiler)
-		return currentContract.compiler->assembly().assemblyJSON(sourceIndices());
+		return currentContract.evmAssembly->assemblyJSON(sourceIndices());
 	else
 		return Json::Value();
 }
@@ -1199,10 +1199,11 @@ void CompilerStack::compileContract(
 		solAssert(false, "Optimizer exception during compilation");
 	}
 
+	compiledContract.evmAssembly = compiler->assemblyPtr();
 	try
 	{
 		// Assemble deployment (incl. runtime)  object.
-		compiledContract.object = compiler->assembly().assemble();
+		compiledContract.object = compiledContract.evmAssembly->assemble();
 		solAssert(compiledContract.object.immutableReferences.empty(), "Leftover immutables.");
 	}
 	catch(evmasm::AssemblyException const&)
@@ -1210,10 +1211,11 @@ void CompilerStack::compileContract(
 		solAssert(false, "Assembly exception for bytecode");
 	}
 
+	compiledContract.evmRuntimeAssembly = compiler->runtimeAssemblyPtr();
 	try
 	{
 		// Assemble runtime object.
-		compiledContract.runtimeObject = compiler->runtimeAssembly().assemble();
+		compiledContract.runtimeObject = compiledContract.evmRuntimeAssembly->assemble();
 	}
 	catch(evmasm::AssemblyException const&)
 	{
