@@ -85,6 +85,19 @@ public:
 	/// @returns The character of the current location after update is returned.
 	char setPosition(size_t _location);
 
+	/// Tests whether or not given octet sequence is present at the current reading position.
+	/// @returns true if the sequence could be found, false otherwise.
+	bool prefixMatch(std::string_view _sequence) const
+	{
+		if (m_position + _sequence.size() >= m_source.size())
+			return false;
+
+		for (size_t i = 0; i < _sequence.size(); ++i)
+			if (_sequence[i] != get(i))
+				return false;
+		return true;
+	}
+
 	void reset() { m_position = 0; }
 
 	std::string const& source() const noexcept { return m_source; }

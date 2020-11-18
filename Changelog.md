@@ -9,6 +9,9 @@ Compiler Features:
  * SMTChecker: Support named arguments in function calls.
  * SMTChecker: Support struct constructor.
 
+Language Features:
+ * Scanner: Generates a parser error when comments do contain an unbalanced or underflowing set of unicode direction override markers (LRO, RLO, PDF)
+
 Bugfixes:
  * SMTChecker: Fix internal compiler error when doing bitwise compound assignment with string literals.
 

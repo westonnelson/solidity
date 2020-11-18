@@ -89,6 +89,9 @@ enum class ScannerError
 	IllegalExponent,
 	IllegalNumberEnd,
 
+	DirectionalOverrideUnderflowInComment,
+	DirectionalOverrideMismatchInComment,
+
 	OctalNotAllowed,
 };
 
@@ -183,6 +186,10 @@ public:
 	///@}
 
 private:
+	struct UnicodeDirectionOverrideProcessor;
+
+	struct UnicodeDirectionProcessor;
+
 	inline Token setError(ScannerError _error) noexcept
 	{
 		m_tokens[NextNext].error = _error;
@@ -247,6 +254,22 @@ private:
 	Token scanMultiLineDocComment();
 	/// Scans a slash '/' and depending on the characters returns the appropriate token
 	Token scanSlash();
+
+	/// Tries scanning given octet sequence and advances reading position respectively iff found.
+	/// @returns true if it could be scanned, false otherwise.
+	bool tryScanByteSequenceAndAdvance(std::string_view _sequence)
+	{
+		if (m_source->isPastEndOfInput(_sequence.size()))
+			return false;
+
+		if (!m_source->prefixMatch(_sequence))
+			return false;
+
+		for (size_t i = 0; i < _sequence.size(); ++i)
+			advance();
+
+		return true;
+	}
 
 	/// Scans an escape-sequence which is part of a string and adds the
 	/// decoded character to the current literal. Returns true if a pattern

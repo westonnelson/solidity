@@ -54,9 +54,15 @@
 #include <liblangutil/Exceptions.h>
 #include <liblangutil/Scanner.h>
 
+//#include <boost/algorithm/
+#include <boost/algorithm/string/classification.hpp>
+#include <boost/range.hpp>
+
 #include <algorithm>
+#include <initializer_list>
 #include <optional>
 #include <ostream>
+#include <string_view>
 #include <tuple>
 
 using namespace std;
@@ -79,6 +85,8 @@ string to_string(ScannerError _errorCode)
 		case ScannerError::IllegalExponent: return "Invalid exponent.";
 		case ScannerError::IllegalNumberEnd: return "Identifier-start is not allowed at end of a number.";
 		case ScannerError::OctalNotAllowed: return "Octal numbers not allowed.";
+		case ScannerError::DirectionalOverrideUnderflowInComment: return "Unicode direction override underflow in comment.";
+		case ScannerError::DirectionalOverrideMismatchInComment: return "Mismatching directional override markers in comment.";
 		default:
 			solAssert(false, "Unhandled case in to_string(ScannerError)");
 			return "";
@@ -271,12 +279,112 @@ bool Scanner::skipWhitespaceExceptUnicodeLinebreak()
 	return sourcePos() != startPosition;
 }
 
+// A little helper class for counting depth of RLO/LRO/RLE/LRE/PDF uses.
+struct Scanner::UnicodeDirectionProcessor
+{
+private:
+	Scanner& m_scanner;
+	std::string_view m_popSequence;
+	std::string_view const* m_pushSequenceBegin;
+	std::string_view const* m_pushSequencesEnd;
+	int m_directionOverrideDepth = 0;
+
+	UnicodeDirectionProcessor(Scanner& _scanner, string_view _pop, string_view const* _pushBegin, string_view  const*_pushEnd):
+		m_scanner{_scanner},
+		m_popSequence{_pop},
+		m_pushSequenceBegin{_pushBegin},
+		m_pushSequencesEnd{_pushEnd}
+	{
+	}
+
+	/// Tries to scan any of the available push sequences and advances.
+	///
+	/// @retval true could scan push sequence and advance.
+	/// @retval false could not scan push sequence, therefore did not advance.
+	bool tryScanPushSequenceAndAdvance()
+	{
+		for (auto const& seq : boost::make_iterator_range(m_pushSequenceBegin, m_pushSequencesEnd))
+			if (m_scanner.tryScanByteSequenceAndAdvance(seq))
+				return true;
+
+		return false;
+	}
+
+public:
+	/// Constructs an unicode direction processor for embedding and overriding unicode markers.
+	static UnicodeDirectionProcessor embeddingAndOverride(Scanner& _scanner)
+	{
+		static std::string_view pop = "\xE2\x80\xAC"; // PDO - Pop Directional Override
+
+		static std::array<std::string_view, 4> pushes{
+			"\xE2\x80\xAD", // U+202D (LRO - Left-to-Right Override)
+			"\xE2\x80\xAE", // U+202E (RLO - Right-to-Left Override)
+			"\xE2\x80\xAA", // U+202A (LRE - Left-to-Right Embedding)
+			"\xE2\x80\xAB"  // U+202B (RLE - Right-to-Left Embedding)
+		};
+
+		return UnicodeDirectionProcessor(_scanner, pop, pushes.begin(), pushes.end());
+	}
+
+	/// Tries to scan for an RLO/LRO/RLE/LRE/PDF and keeps track of script writing direction override depth.
+	///
+	/// @returns a 2-tuple indicating whether or not successfully some script writing direction
+	///          override has been consumed successfully from the input and an error code in case
+	///          the input's lexical parser state is invalid and this error should be reported
+	///          to the user.
+	pair<bool, ScannerError> operator()()
+	{
+		if (tryScanPushSequenceAndAdvance())
+		{
+			m_directionOverrideDepth++;
+			return {true, ScannerError::NoError};
+		}
+		else if (m_scanner.tryScanByteSequenceAndAdvance("\xE2\x80\xAC")) // U+202C (PDF - Pop Directional Formatting)
+		{
+			m_directionOverrideDepth--;
+			if (m_directionOverrideDepth < 0)
+				return {true, ScannerError::DirectionalOverrideUnderflowInComment};
+			else
+				return {true, ScannerError::NoError};
+		}
+		else
+			return {false, ScannerError::NoError};
+	}
+
+	/// @returns the error code reflecting the current state of this unicode direction processor.
+	ScannerError error() const noexcept
+	{
+		if (m_directionOverrideDepth < 0)
+			return ScannerError::DirectionalOverrideUnderflowInComment;
+		else if (m_directionOverrideDepth > 0)
+			return ScannerError::DirectionalOverrideMismatchInComment;
+		else
+			return ScannerError::NoError;
+	}
+};
+
 Token Scanner::skipSingleLineComment()
 {
+	// UnicodeDirectionOverrideProcessor unicodeDirectionalOverride{*this};
+	auto unicodeDirectionalOverride = UnicodeDirectionProcessor::embeddingAndOverride(*this);
+
 	// Line terminator is not part of the comment. If it is a
 	// non-ascii line terminator, it will result in a parser error.
 	while (!isUnicodeLinebreak())
-		if (!advance()) break;
+	{
+		auto const [streamAdvanced, errorCode] = unicodeDirectionalOverride();
+		if (streamAdvanced && errorCode != ScannerError::NoError)
+			return setError(errorCode);
+		else if (!streamAdvanced)
+		{
+			if (!advance())
+				break;
+		}
+	}
+
+	if (unicodeDirectionalOverride.error() != ScannerError::NoError)
+		// Unbalanced RLO/LRO/PDF codepoint sequences in comment.
+		return setError(unicodeDirectionalOverride.error());
 
 	return Token::Whitespace;
 }
@@ -349,18 +457,31 @@ size_t Scanner::scanSingleLineDocComment()
 
 Token Scanner::skipMultiLineComment()
 {
+	//UnicodeDirectionOverrideProcessor unicodeDirectionalOverride{*this};
+	auto unicodeDirectionalOverride = UnicodeDirectionProcessor::embeddingAndOverride(*this);
+
 	while (!isSourcePastEndOfInput())
 	{
-		char ch = m_char;
-		advance();
-
-		// If we have reached the end of the multi-line comment, we
-		// consume the '/' and insert a whitespace. This way all
-		// multi-line comments are treated as whitespace.
-		if (ch == '*' && m_char == '/')
+		auto const [streamAdvanced, errorCode] = unicodeDirectionalOverride();
+		if (streamAdvanced && errorCode != ScannerError::NoError)
+			return setError(errorCode);
+		else if (!streamAdvanced)
 		{
-			m_char = ' ';
-			return Token::Whitespace;
+			char ch = m_char;
+			advance();
+
+			// If we have reached the end of the multi-line comment, we
+			// consume the '/' and insert a whitespace. This way all
+			// multi-line comments are treated as whitespace.
+			if (ch == '*' && m_char == '/')
+			{
+				if (unicodeDirectionalOverride.error() != ScannerError::NoError)
+					// Unbalanced RLO/LRO/PDF codepoint sequences in comment.
+					return setError(unicodeDirectionalOverride.error());
+
+				m_char = ' ';
+				return Token::Whitespace;
+			}
 		}
 	}
 	// Unterminated multi-line comment.
