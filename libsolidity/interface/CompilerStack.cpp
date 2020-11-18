@@ -209,6 +209,7 @@ void CompilerStack::reset(bool _keepSettings)
 	m_sources.clear();
 	m_smtlib2Responses.clear();
 	m_unhandledSMTLib2Queries.clear();
+	m_contractCallGraphs.clear();
 	if (!_keepSettings)
 	{
 		m_remappings.clear();
@@ -389,6 +390,16 @@ bool CompilerStack::analyze()
 		for (Source const* source: m_sourceOrder)
 			if (source->ast && !typeChecker.checkTypeRequirements(*source->ast))
 				noErrors = false;
+
+		if (noErrors)
+		{
+			FunctionCallGraphBuilder builder;
+			for (Source const* source: m_sourceOrder)
+				if (source->ast)
+					for (ASTPointer<ASTNode> const& node: source->ast->nodes())
+						if (ContractDefinition* contract = dynamic_cast<ContractDefinition*>(node.get()))
+							m_contractCallGraphs.emplace(contract, builder.create(*contract));
+		}
 
 		if (noErrors)
 		{
@@ -1246,7 +1257,7 @@ void CompilerStack::generateIR(ContractDefinition const& _contract)
 	for (auto const& pair: m_contracts)
 		otherYulSources.emplace(pair.second.contract, pair.second.yulIR);
 
-	IRGenerator generator(m_evmVersion, m_revertStrings, m_optimiserSettings);
+	IRGenerator generator(m_evmVersion, m_revertStrings, m_optimiserSettings, m_contractCallGraphs[&_contract]);
 	tie(compiledContract.yulIR, compiledContract.yulIROptimized) = generator.run(_contract, otherYulSources);
 }
 

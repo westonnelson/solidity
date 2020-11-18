@@ -25,6 +25,7 @@
 
 #include <libsolidity/interface/OptimiserSettings.h>
 #include <libsolidity/ast/ASTForward.h>
+#include <libsolidity/analysis/FunctionCallGraph.h>
 #include <libsolidity/codegen/ir/IRGenerationContext.h>
 #include <libsolidity/codegen/YulUtilFunctions.h>
 #include <liblangutil/EVMVersion.h>
@@ -41,13 +42,16 @@ public:
 	IRGenerator(
 		langutil::EVMVersion _evmVersion,
 		RevertStrings _revertStrings,
-		OptimiserSettings _optimiserSettings
+		OptimiserSettings _optimiserSettings,
+		std::shared_ptr<FunctionCallGraphBuilder::ContractCallGraph> const _graph
 	):
 		m_evmVersion(_evmVersion),
 		m_optimiserSettings(_optimiserSettings),
+		m_contractGraph(_graph),
 		m_context(_evmVersion, _revertStrings, std::move(_optimiserSettings)),
 		m_utils(_evmVersion, m_context.revertStrings(), m_context.functionCollector())
-	{}
+	{
+	}
 
 	/// Generates and returns the IR code, in unoptimized and optimized form
 	/// (or just pretty-printed, depending on the optimizer settings).
@@ -108,6 +112,8 @@ private:
 
 	langutil::EVMVersion const m_evmVersion;
 	OptimiserSettings const m_optimiserSettings;
+
+	std::shared_ptr<FunctionCallGraphBuilder::ContractCallGraph> const m_contractGraph;
 
 	IRGenerationContext m_context;
 	YulUtilFunctions m_utils;

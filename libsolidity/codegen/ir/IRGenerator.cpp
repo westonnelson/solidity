@@ -48,6 +48,22 @@ using namespace solidity;
 using namespace solidity::util;
 using namespace solidity::frontend;
 
+namespace {
+
+void compareWithCallGraph(FunctionCallGraphBuilder::NodeSet const& _nodes, set<string>& _functionList)
+{
+	for (auto const& node: _nodes)
+		if (auto const* functionDef = dynamic_cast<FunctionDefinition const*>(node->callable))
+			solAssert(_functionList.erase(IRNames::function(*functionDef)) == 1, "Function not found in generated code");
+
+	static string const funPrefix = "fun_";
+
+	for (string const& name: _functionList)
+		solAssert(name.substr(0, funPrefix.size()) != funPrefix, "Functions found in code gen that were not in the call graph");
+}
+
+}
+
 pair<string, string> IRGenerator::run(
 	ContractDefinition const& _contract,
 	map<ContractDefinition const*, string_view const> const& _otherYulSources
@@ -140,13 +156,19 @@ string IRGenerator::generate(
 	generateImplicitConstructors(_contract);
 	generateQueuedFunctions();
 	InternalDispatchMap internalDispatchMap = generateInternalDispatchFunctions();
-	t("functions", m_context.functionCollector().requestedFunctions());
+
+	set<string> functionList;
+
+	t("functions", m_context.functionCollector().requestedFunctions(&functionList));
 	t("subObjects", subObjectSources(m_context.subObjectsCreated()));
 
 	// This has to be called only after all other code generation for the creation object is complete.
 	bool creationInvolvesAssembly = m_context.inlineAssemblySeen();
 	t("memoryInitCreation", memoryInit(!creationInvolvesAssembly));
 
+
+	compareWithCallGraph(m_contractGraph->creationCalls, functionList);
+	functionList.clear();
 	resetContext(_contract);
 
 	// NOTE: Function pointers can be passed from creation code via storage variables. We need to
@@ -159,12 +181,16 @@ string IRGenerator::generate(
 	t("dispatch", dispatchRoutine(_contract));
 	generateQueuedFunctions();
 	generateInternalDispatchFunctions();
-	t("runtimeFunctions", m_context.functionCollector().requestedFunctions());
+	t("runtimeFunctions", m_context.functionCollector().requestedFunctions(&functionList));
 	t("runtimeSubObjects", subObjectSources(m_context.subObjectsCreated()));
 
 	// This has to be called only after all other code generation for the runtime object is complete.
 	bool runtimeInvolvesAssembly = m_context.inlineAssemblySeen();
 	t("memoryInitRuntime", memoryInit(!runtimeInvolvesAssembly));
+
+	if (!_contract.isLibrary())
+		compareWithCallGraph(m_contractGraph->runtimeCalls, functionList);
+
 	return t.render();
 }
 
@@ -178,8 +204,12 @@ string IRGenerator::generate(Block const& _block)
 void IRGenerator::generateQueuedFunctions()
 {
 	while (!m_context.functionGenerationQueueEmpty())
+	{
 		// NOTE: generateFunction() may modify function generation queue
 		generateFunction(*m_context.dequeueFunctionForCodeGeneration());
+	}
+
+
 }
 
 InternalDispatchMap IRGenerator::generateInternalDispatchFunctions()
