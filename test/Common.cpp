@@ -98,6 +98,7 @@ CommonOptions::CommonOptions(std::string _caption):
 		("no-smt", po::bool_switch(&disableSMT), "disable SMT checker")
 		("optimize", po::bool_switch(&optimize), "enables optimization")
 		("enforce-via-yul", po::bool_switch(&enforceViaYul), "Enforce compiling all tests via yul to see if additional tests can be activated.")
+		("enforce-compile-to-ewasm", po::bool_switch(&enforceCompileToEwasm), "Enforce compiling all tests to ewasm to see if additional tests can be activated.")
 		("abiencoderv2", po::bool_switch(&useABIEncoderV2), "enables abi encoder v2")
 		("show-messages", po::bool_switch(&showMessages), "enables message output")
 		("show-metadata", po::bool_switch(&showMetadata), "enables metadata output");
