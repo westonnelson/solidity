@@ -3,6 +3,8 @@
 Compiler Features:
  * SMTChecker: Support named arguments in function calls.
 
+Bugfixes:
+ * Code generator: Do not pad empty string literals with a single 32-byte zero field in the ABI coder V1.
 
 ### 0.7.5 (2020-11-18)
 
