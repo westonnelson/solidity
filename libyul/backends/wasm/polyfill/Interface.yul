@@ -20,13 +20,14 @@
 
 function address() -> z1, z2, z3, z4 {
 	eth.getAddress(0:i32)
-	z1, z2, z3, z4 := mload_internal(0:i32)
+	z2, z3, z4 := mload_address(0:i32)
 }
 
 function balance(x1, x2, x3, x4) -> z1, z2, z3, z4 {
 	mstore_address(0:i32, x1, x2, x3, x4)
-	eth.getExternalBalance(12:i32, 48:i32)
-	z1, z2, z3, z4 := mload_internal(32:i32)
+	eth.getExternalBalance(0:i32, 32:i32)
+	z3 := i64.load(40:i32)
+	z4 := i64.load(32:i32)
 }
 
 function selfbalance() -> z1, z2, z3, z4 {
@@ -41,12 +42,12 @@ function chainid() -> z1, z2, z3, z4 {
 
 function origin() -> z1, z2, z3, z4 {
 	eth.getTxOrigin(0:i32)
-	z1, z2, z3, z4 := mload_internal(0:i32)
+	z2, z3, z4 := mload_address(0:i32)
 }
 
 function caller() -> z1, z2, z3, z4 {
 	eth.getCaller(0:i32)
-	z1, z2, z3, z4 := mload_internal(0:i32)
+	z2, z3, z4 := mload_address(0:i32)
 }
 
 function callvalue() -> z1, z2, z3, z4 {
@@ -116,7 +117,7 @@ function gasprice() -> z1, z2, z3, z4 {
 
 function extcodesize_internal(x1, x2, x3, x4) -> r:i32 {
 	mstore_address(0:i32, x1, x2, x3, x4)
-	r := eth.getExternalCodeSize(12:i32)
+	r := eth.getExternalCodeSize(0:i32)
 }
 
 function extcodesize(x1, x2, x3, x4) -> z1, z2, z3, z4 {
@@ -132,7 +133,7 @@ function extcodecopy(a1, a2, a3, a4, p1, p2, p3, p4, o1, o2, o3, o4, l1, l2, l3,
 	mstore_address(0:i32, a1, a2, a3, a4)
 	let codeOffset:i32 := u256_to_i32(o1, o2, o3, o4)
 	let codeLength:i32 := u256_to_i32(l1, l2, l3, l4)
-	eth.externalCodeCopy(12:i32, to_internal_i32ptr(p1, p2, p3, p4), codeOffset, codeLength)
+	eth.externalCodeCopy(0:i32, to_internal_i32ptr(p1, p2, p3, p4), codeOffset, codeLength)
 }
 
 function returndatasize() -> z1, z2, z3, z4 {
@@ -156,7 +157,7 @@ function blockhash(x1, x2, x3, x4) -> z1, z2, z3, z4 {
 
 function coinbase() -> z1, z2, z3, z4 {
 	eth.getBlockCoinbase(0:i32)
-	z1, z2, z3, z4 := mload_internal(0:i32)
+	z2, z3, z4 := mload_address(0:i32)
 }
 
 function timestamp() -> z1, z2, z3, z4 {
@@ -180,32 +181,8 @@ function mload(x1, x2, x3, x4) -> z1, z2, z3, z4 {
 	z1, z2, z3, z4 := mload_internal(to_internal_i32ptr(x1, x2, x3, x4))
 }
 
-function mload_internal(pos:i32) -> z1, z2, z3, z4 {
-	z1 := bswap64(i64.load(pos))
-	z2 := bswap64(i64.load(i32.add(pos, 8:i32)))
-	z3 := bswap64(i64.load(i32.add(pos, 16:i32)))
-	z4 := bswap64(i64.load(i32.add(pos, 24:i32)))
-}
-
 function mstore(x1, x2, x3, x4, y1, y2, y3, y4) {
 	mstore_internal(to_internal_i32ptr(x1, x2, x3, x4), y1, y2, y3, y4)
-}
-
-function mstore_internal(pos:i32, y1, y2, y3, y4) {
-	i64.store(pos, bswap64(y1))
-	i64.store(i32.add(pos, 8:i32), bswap64(y2))
-	i64.store(i32.add(pos, 16:i32), bswap64(y3))
-	i64.store(i32.add(pos, 24:i32), bswap64(y4))
-}
-
-function mstore_address(pos:i32, a1, a2, a3, a4) {
-	a1, a2, a3 := u256_to_address(a1, a2, a3, a4)
-	mstore_internal(pos, 0, a1, a2, a3)
-}
-
-function mstore8(x1, x2, x3, x4, y1, y2, y3, y4) {
-	let v := u256_to_byte(y1, y2, y3, y4)
-	i64.store8(to_internal_i32ptr(x1, x2, x3, x4), v)
 }
 
 // Needed?
@@ -330,7 +307,7 @@ function call(
 	let v1, v2 := u256_to_u128(c1, c2, c3, c4)
 	mstore_internal(32:i32, 0, 0, v1, v2)
 
-	x4 := i64.extend_i32_u(eth.call(g, 12:i32, 32:i32, to_internal_i32ptr(d1, d2, d3, d4), u256_to_i32(e1, e2, e3, e4)))
+	x4 := i64.extend_i32_u(eth.call(g, 0:i32, 32:i32, to_internal_i32ptr(d1, d2, d3, d4), u256_to_i32(e1, e2, e3, e4)))
 }
 
 function callcode(
@@ -349,7 +326,7 @@ function callcode(
 
 	x4 := i64.extend_i32_u(eth.callCode(
 		u256_to_i64(a1, a2, a3, a4),
-		12:i32,
+		0:i32,
 		32:i32,
 		to_internal_i32ptr(d1, d2, d3, d4),
 		u256_to_i32(e1, e2, e3, e4)
@@ -368,7 +345,7 @@ function delegatecall(
 
 	x4 := i64.extend_i32_u(eth.callDelegate(
 		u256_to_i64(a1, a2, a3, a4),
-		12:i32,
+		0:i32,
 		to_internal_i32ptr(c1, c2, c3, c4),
 		u256_to_i32(d1, d2, d3, d4)
 	))
@@ -386,7 +363,7 @@ function staticcall(
 
 	x4 := i64.extend_i32_u(eth.callStatic(
 		u256_to_i64(a1, a2, a3, a4),
-		12:i32,
+		0:i32,
 		to_internal_i32ptr(c1, c2, c3, c4),
 		u256_to_i32(d1, d2, d3, d4)
 	))
@@ -405,7 +382,7 @@ function create2(
 function selfdestruct(a1, a2, a3, a4) {
 	mstore_address(0:i32, a1, a2, a3, a4)
 	// In EVM, addresses are padded to 32 bytes, so discard the first 12.
-	eth.selfDestruct(12:i32)
+	eth.selfDestruct(0:i32)
 }
 
 function return(x1, x2, x3, x4, y1, y2, y3, y4) {
