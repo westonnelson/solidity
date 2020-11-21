@@ -6,5 +6,5 @@
 // Trace:
 //   SELFDESTRUCT()
 // Memory dump:
-//      0: 000000000000000000000000ffffffffffffffffffffffffffffffffffffffff
+//      0: ffffffffffffffffffffffffffffffffffffffff000000000000000000000000
 // Storage dump:
