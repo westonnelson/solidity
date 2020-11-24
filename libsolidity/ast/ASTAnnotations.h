@@ -260,6 +260,9 @@ struct ExpressionAnnotation: ASTAnnotation
 	/// Types and - if given - names of arguments if the expr. is a function
 	/// that is called, used for overload resolution
 	std::optional<FuncCallArguments> arguments;
+
+	/// If expression references a function this says if it was called directly or only accessed
+	bool calledDirectly = false;
 };
 
 struct IdentifierAnnotation: ExpressionAnnotation
