@@ -50,16 +50,41 @@ using namespace solidity::frontend;
 
 namespace {
 
-void compareWithCallGraph(FunctionCallGraphBuilder::NodeSet const& _nodes, set<string>& _functionList)
+void verifyCallGraph(set<ASTNode const*, ASTNode::CompareByID> const& _nodes, set<string>& _functionList)
 {
 	for (auto const& node: _nodes)
-		if (auto const* functionDef = dynamic_cast<FunctionDefinition const*>(node->callable))
+		if (auto const* functionDef = dynamic_cast<FunctionDefinition const*>(node))
 			solAssert(_functionList.erase(IRNames::function(*functionDef)) == 1, "Function not found in generated code");
 
 	static string const funPrefix = "fun_";
 
 	for (string const& name: _functionList)
 		solAssert(name.substr(0, funPrefix.size()) != funPrefix, "Functions found in code gen that were not in the call graph");
+}
+
+
+void collectCalls(FunctionCallGraphBuilder::ContractCallGraph const& _graph, ASTNode const* _root, set<ASTNode const*, ASTNode::CompareByID>& _functions)
+{
+	if (_functions.count(_root) > 0)
+		return;
+
+	set<ASTNode const*, ASTNode::CompareByID> toVisit{_root};
+
+	_functions.emplace(_root);
+
+	while (!toVisit.empty())
+	{
+		ASTNode const* function = *toVisit.begin();
+		toVisit.erase(toVisit.begin());
+
+		auto [begin, end] = _graph.edges.equal_range(function);
+		while (begin != end)
+		{
+			if (_functions.emplace(begin->second).second)
+				toVisit.emplace(begin->second);
+			begin++;
+		}
+	}
 }
 
 }
@@ -90,6 +115,41 @@ pair<string, string> IRGenerator::run(
 		" *******************************************************/\n\n";
 
 	return {warning + ir, warning + asmStack.print()};
+}
+
+void IRGenerator::verifyCallGraph(FunctionCallGraphBuilder::ContractCallGraph const& _graph)
+{
+	set<ASTNode const*, ASTNode::CompareByID> functions;
+
+	{
+		auto [begin, end] =_graph.edges.equal_range(FunctionCallGraphBuilder::SpecialNode::CreationRoot);
+
+		while (begin != end)
+		{
+			collectCalls(_graph, begin->second, functions);
+			begin++;
+		}
+	}
+
+	::verifyCallGraph(functions, m_creationFunctionList);
+
+	functions.clear();
+
+	for(auto& [hash, functionType]: _graph.contract.interfaceFunctionList())
+	{
+		collectCalls(_graph, &functionType->declaration(), functions);
+
+		auto [begin, end] =_graph.edges.equal_range(&functionType->declaration());
+
+		while (begin != end)
+		{
+			collectCalls(_graph, begin->second, functions);
+			begin++;
+		}
+
+	}
+
+	::verifyCallGraph(functions, m_runtimeFunctionList);
 }
 
 string IRGenerator::generate(
@@ -157,18 +217,13 @@ string IRGenerator::generate(
 	generateQueuedFunctions();
 	InternalDispatchMap internalDispatchMap = generateInternalDispatchFunctions();
 
-	set<string> functionList;
-
-	t("functions", m_context.functionCollector().requestedFunctions(&functionList));
+	t("functions", m_context.functionCollector().requestedFunctions(&m_creationFunctionList));
 	t("subObjects", subObjectSources(m_context.subObjectsCreated()));
 
 	// This has to be called only after all other code generation for the creation object is complete.
 	bool creationInvolvesAssembly = m_context.inlineAssemblySeen();
 	t("memoryInitCreation", memoryInit(!creationInvolvesAssembly));
 
-
-	compareWithCallGraph(m_contractGraph->creationCalls, functionList);
-	functionList.clear();
 	resetContext(_contract);
 
 	// NOTE: Function pointers can be passed from creation code via storage variables. We need to
@@ -181,15 +236,12 @@ string IRGenerator::generate(
 	t("dispatch", dispatchRoutine(_contract));
 	generateQueuedFunctions();
 	generateInternalDispatchFunctions();
-	t("runtimeFunctions", m_context.functionCollector().requestedFunctions(&functionList));
+	t("runtimeFunctions", m_context.functionCollector().requestedFunctions(&m_runtimeFunctionList));
 	t("runtimeSubObjects", subObjectSources(m_context.subObjectsCreated()));
 
 	// This has to be called only after all other code generation for the runtime object is complete.
 	bool runtimeInvolvesAssembly = m_context.inlineAssemblySeen();
 	t("memoryInitRuntime", memoryInit(!runtimeInvolvesAssembly));
-
-	if (!_contract.isLibrary())
-		compareWithCallGraph(m_contractGraph->runtimeCalls, functionList);
 
 	return t.render();
 }

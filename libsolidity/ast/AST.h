@@ -753,6 +753,15 @@ public:
 		ContractDefinition const* _searchStart = nullptr
 	) const = 0;
 
+	CallableDeclaration const& resolveSuper(ContractDefinition const& _contract) const
+	{
+		ContractDefinition const* super = nullptr;
+
+		if (_contract.annotation().linearizedBaseContracts.size() >= 2)
+			super = _contract.annotation().linearizedBaseContracts[1];
+
+		return resolveVirtual(_contract, super);
+	}
 protected:
 	ASTPointer<ParameterList> m_parameters;
 	ASTPointer<OverrideSpecifier> m_overrides;

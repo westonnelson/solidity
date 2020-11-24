@@ -42,12 +42,10 @@ public:
 	IRGenerator(
 		langutil::EVMVersion _evmVersion,
 		RevertStrings _revertStrings,
-		OptimiserSettings _optimiserSettings,
-		std::shared_ptr<FunctionCallGraphBuilder::ContractCallGraph> const _graph
+		OptimiserSettings _optimiserSettings
 	):
 		m_evmVersion(_evmVersion),
 		m_optimiserSettings(_optimiserSettings),
-		m_contractGraph(_graph),
 		m_context(_evmVersion, _revertStrings, std::move(_optimiserSettings)),
 		m_utils(_evmVersion, m_context.revertStrings(), m_context.functionCollector())
 	{
@@ -59,6 +57,8 @@ public:
 		ContractDefinition const& _contract,
 		std::map<ContractDefinition const*, std::string_view const> const& _otherYulSources
 	);
+
+	void verifyCallGraph(FunctionCallGraphBuilder::ContractCallGraph const& _graph);
 
 private:
 	std::string generate(
@@ -113,7 +113,8 @@ private:
 	langutil::EVMVersion const m_evmVersion;
 	OptimiserSettings const m_optimiserSettings;
 
-	std::shared_ptr<FunctionCallGraphBuilder::ContractCallGraph> const m_contractGraph;
+	std::set<std::string> m_creationFunctionList;
+	std::set<std::string> m_runtimeFunctionList;
 
 	IRGenerationContext m_context;
 	YulUtilFunctions m_utils;

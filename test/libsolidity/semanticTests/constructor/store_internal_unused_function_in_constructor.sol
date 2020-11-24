@@ -10,6 +10,7 @@ contract C {
     }
 
     function t() public returns (uint256) {
+		unused();
         return x();
     }
 }

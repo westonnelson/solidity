@@ -22,46 +22,56 @@
 #include <libsolidity/ast/ASTVisitor.h>
 
 #include <vector>
+#include <variant>
 
 namespace solidity::frontend
 {
 
+/* Creates a Function call graph for a contract.
+ * Includes the following special nodes:
+ *  - CreationRoot: All calls made at contract creation originate from this node
+ *  - CreationDispatch: Represents the creation dispatch function
+ *  - RuntimeDispatch: Represents the dispatch for the runtime part
+ *
+ *  Nodes are a variant of either the enum SpecialNode or an ASTNode pointer.
+ *  ASTNodes are usually inherited from CallableDeclarations
+ *  (FunctionDefinition, ModifierDefinition, EventDefinition) but for functions
+ *  without declaration it is directly the FunctionCall AST node.
+ *
+ *  Functions that are not called right away as well as functions without
+ *  declarations have an edge to the dispatch node. */
 class FunctionCallGraphBuilder: private ASTConstVisitor
 {
 public:
-	struct Node;
+	enum class SpecialNode { Unset, CreationRoot, CreationDispatch, RuntimeDispatch };
 
-	struct NodeCompare
+	typedef std::variant<ASTNode const*, SpecialNode> Node;
+
+	struct CompareByID
 	{
-		// this member is required to let container be aware that
-		// comparator is capable of dealing with types other than key
-		using is_transparent = std::true_type;
+		using is_transparent = void;
 
-		bool operator()(std::shared_ptr<Node> const _lhs, std::shared_ptr<Node> const _rhs) const
+		bool operator()(Node const& _lhs, Node const& _rhs) const
 		{
-			return _lhs->callable < _rhs->callable;
+			if (_lhs.index() != _rhs.index())
+				return _lhs.index() < _rhs.index();
+
+			if (std::holds_alternative<SpecialNode>(_lhs))
+				return std::get<SpecialNode>(_lhs) < std::get<SpecialNode>(_rhs);
+			return std::get<ASTNode const*>(_lhs)->id() < std::get<ASTNode const*>(_rhs)->id();
 		}
-		bool operator()(std::shared_ptr<Node> const _lhs, CallableDeclaration const* _rhs) const
+		bool operator()(Node const& _lhs, int64_t _rhs) const
 		{
-			return _lhs->callable < _rhs;
+			solAssert(!std::holds_alternative<SpecialNode>(_lhs), "");
+
+			return std::get<ASTNode const*>(_lhs)->id() < _rhs;
 		}
-		bool operator()(CallableDeclaration const* _lhs, std::shared_ptr<Node> const _rhs) const
+		bool operator()(int64_t _lhs, Node const& _rhs) const
 		{
-			return _lhs < _rhs->callable;
+			solAssert(!std::holds_alternative<SpecialNode>(_rhs), "");
+
+			return _lhs < std::get<ASTNode const*>(_rhs)->id();
 		}
-	};
-
-	typedef std::set<std::shared_ptr<Node>, NodeCompare> NodeSet;
-
-	struct Node
-	{
-		Node(CallableDeclaration const* _callable): callable(_callable) {}
-		// Definition of this function/modifier/event, might be nullptr for
-		// implicit constructors
-		CallableDeclaration const* callable = nullptr;
-
-		// Calls that this function/modifier/event makes to other callables
-		NodeSet calls;
 	};
 
 	struct ContractCallGraph
@@ -70,10 +80,11 @@ public:
 
 		/// Contract for which this is the graph
 		ContractDefinition const& contract;
-		/// Calls made at creation time (constructor, state variables, ..)
-		NodeSet creationCalls;
-		/// Calls possible at runtime (public functions, events)
-		NodeSet runtimeCalls;
+
+		std::multimap<Node, ASTNode const*, CompareByID> edges;
+
+		/// Set of contracts created
+		std::set<ContractDefinition const*, ASTNode::CompareByID> createdContracts;
 	};
 
 	std::shared_ptr<ContractCallGraph> const create(ContractDefinition const& _contract);
@@ -82,13 +93,20 @@ private:
 	bool visit(Identifier const& _identifier) override;
 	bool visit(NewExpression const& _newExpression) override;
 	bool visit(MemberAccess const& _memberAccess) override;
+	bool visit(FunctionCall const& _functionCall) override;
 
 	void visitCallable(CallableDeclaration const* _callable);
-	void visitConstructor(ContractDefinition const& _contract);
+	void visitConstructor(
+		ContractDefinition const& _contract,
+		std::vector<ContractDefinition const*>::const_iterator _start,
+		std::vector<ContractDefinition const*>::const_iterator _end
+	);
+
 
 	ContractDefinition const* m_contract = nullptr;
-	std::shared_ptr<Node> m_currentNode = nullptr;
-	NodeSet* m_nodes = nullptr;
+	Node m_currentNode = SpecialNode::Unset;
+	std::shared_ptr<ContractCallGraph> m_graph = nullptr;
+	Node m_currentDispatch = SpecialNode::Unset;
 };
 
 }

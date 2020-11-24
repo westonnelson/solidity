@@ -19,6 +19,19 @@
 #include <libsolidity/analysis/FunctionCallGraph.h>
 
 using namespace std;
+using namespace solidity::frontend;
+
+namespace {
+
+bool nodeSet(FunctionCallGraphBuilder::Node const& _node)
+{
+	if (auto node = std::get_if<FunctionCallGraphBuilder::SpecialNode>(&_node))
+		return *node != FunctionCallGraphBuilder::SpecialNode::Unset;
+
+	return true;
+}
+
+}
 
 namespace solidity::frontend
 {
@@ -28,27 +41,34 @@ shared_ptr<FunctionCallGraphBuilder::ContractCallGraph> const FunctionCallGraphB
 {
 	m_contract = &_contract;
 
-	std::shared_ptr<ContractCallGraph> graph= make_shared<ContractCallGraph>(_contract);
+	m_graph = make_shared<ContractCallGraph>(_contract);
 
 	// Create graph for constructor, state vars, etc
-	m_nodes = &graph->creationCalls;
-	visitConstructor(_contract);
-
+	m_currentNode = SpecialNode::CreationRoot;
+	m_currentDispatch = SpecialNode::CreationDispatch;
+	visitConstructor(
+		_contract,
+		_contract.annotation().linearizedBaseContracts.cbegin() + 1,
+		_contract.annotation().linearizedBaseContracts.cend()
+	);
+	m_currentNode = SpecialNode::Unset;
+	m_currentDispatch = SpecialNode::RuntimeDispatch;
 
 	// Create graph for all publicly reachable functions
-	m_nodes = &graph->runtimeCalls;
 	for (auto& [hash, functionType]: _contract.interfaceFunctionList())
 		if (auto const* funcDef = dynamic_cast<FunctionDefinition const*>(&functionType->declaration()))
-			if (!m_nodes->count(funcDef))
+			if (!m_graph->edges.count(funcDef))
 				visitCallable(funcDef);
 
 	m_contract = nullptr;
-	m_nodes = nullptr;
-	solAssert(m_currentNode == nullptr, "Current node not properly reset.");
+	solAssert(!nodeSet(m_currentNode), "Current node not properly reset.");
 
-	return graph;
+	return m_graph;
 }
 
+// Function not called right away -> dispatch
+// FunctionCall without ref -> dispatch
+//
 bool FunctionCallGraphBuilder::visit(Identifier const& _identifier)
 {
 	if (auto const* callable = dynamic_cast<CallableDeclaration const*>(_identifier.annotation().referencedDeclaration))
@@ -61,14 +81,20 @@ bool FunctionCallGraphBuilder::visit(Identifier const& _identifier)
 			"Only MemberAccess can have lookup 'super'"
 		);
 
-		// Ignore calls to other contract
-		if (callable->annotation().contract && !m_contract->derivesFrom(*callable->annotation().contract) && !callable->annotation().contract->isLibrary())
-			return true;
+		// Ignore all calls that are not internal
+		if (auto funcType = dynamic_cast<FunctionType const*>(callable->type()))
+			if (funcType->kind() != FunctionType::Kind::Internal)
+				return true;
 
-		if (!m_nodes->count(callable))
+		if (!m_graph->edges.count(callable))
+		{
+			// Create edge to creation dispatch (possibly will be removed if
+			// function is called in FunctionCall visitor)
+			m_graph->edges.emplace(m_currentDispatch);
 			visitCallable(callable);
+		}
 
-		m_currentNode->calls.emplace(*m_nodes->find(callable));
+		solAssert(nodeSet(m_currentNode), "");
 	}
 
 	return true;
@@ -77,12 +103,7 @@ bool FunctionCallGraphBuilder::visit(Identifier const& _identifier)
 bool FunctionCallGraphBuilder::visit(NewExpression const& _newExpression)
 {
 	if (ContractType const* contractType = dynamic_cast<ContractType const*>(_newExpression.typeName().annotation().type))
-	{
-		CallableDeclaration const* callable = contractType->contractDefinition().constructor();
-
-		if (!m_nodes->count(callable))
-			m_nodes->emplace(make_shared<Node>(callable));
-	}
+		m_graph->createdContracts.emplace(&contractType->contractDefinition());
 
 	return true;
 }
@@ -93,9 +114,14 @@ bool FunctionCallGraphBuilder::visit(MemberAccess const& _memberAccess)
 	{
 		if (*_memberAccess.annotation().requiredLookup == VirtualLookup::Super)
 		{
+			CallableDeclaration const* callableNode = nullptr;
+
+			if (auto node = std::get_if<ASTNode const*>(&m_currentNode))
+				callableNode = dynamic_cast<CallableDeclaration const*>(*node);
+
 			ContractDefinition const* super =
-				m_currentNode->callable ?
-				m_currentNode->callable->annotation().contract :
+				callableNode ?
+				callableNode->annotation().contract :
 				m_contract;
 
 			callable = &callable->resolveVirtual(*m_contract, super);
@@ -106,44 +132,69 @@ bool FunctionCallGraphBuilder::visit(MemberAccess const& _memberAccess)
 			"MemberAccess cannot have lookup 'virtual'"
 		);
 
-		// Ignore calls to other contracts
-		if (callable->annotation().contract && !m_contract->derivesFrom(*callable->annotation().contract) && !callable->annotation().contract->isLibrary())
+		// Ignore all calls that are not internal
+		if (callable->visibility() == Visibility::External)
 			return true;
 
-		if (!m_nodes->count(callable))
+		if (auto funcType = dynamic_cast<FunctionType const*>(callable->type()))
+			if (funcType->kind() != FunctionType::Kind::Internal)
+				return true;
+
+		if (!m_graph->edges.count(callable))
 			visitCallable(callable);
 	}
 
 	return true;
 }
 
-void FunctionCallGraphBuilder::visitCallable(CallableDeclaration const* _callable)
+bool FunctionCallGraphBuilder::visit(FunctionCall const& _functionCall)
 {
-	solAssert(!m_nodes->count(_callable), "");
+	_functionCall.expression().accept(*this);
+	FunctionCall::listAccept(_functionCall.arguments(), *this);
 
-	auto previousCallable = m_currentNode;
-	m_nodes->emplace(m_currentNode = make_shared<Node>(_callable));
-	_callable->accept(*this);
-	m_currentNode = previousCallable;
+	auto& functionType = dynamic_cast<FunctionType const&>(*_functionCall.expression().annotation().type);
+
+	if (functionType.hasDeclaration())
+	auto [begin, end] = m_graph->edges.equal_range(m_currentDispatch);
+
+	while (begin != end)
+		if (dynamic_cast<FunctionDefinition const*>(begin->second)->annotation().type
+
+	return false;
 }
 
-void FunctionCallGraphBuilder::visitConstructor(ContractDefinition const& _contract)
+void FunctionCallGraphBuilder::visitCallable(CallableDeclaration const* _callable)
 {
-	auto previousNode = m_currentNode;
-	m_nodes->emplace(m_currentNode = make_shared<Node>(_contract.constructor()));
-	if (previousNode)
-		previousNode->calls.emplace(m_currentNode);
+	solAssert(!m_graph->edges.count(_callable), "");
 
-	if (_contract.annotation().linearizedBaseContracts.size() > 1)
-		visitConstructor(*_contract.annotation().linearizedBaseContracts[1]);
+	auto previousNode = m_currentNode;
+	m_currentNode = _callable;
+
+	if (nodeSet(previousNode))
+		m_graph->edges.emplace(previousNode, _callable);
+
+	_callable->accept(*this);
+
+	m_currentNode = previousNode;
+}
+
+void FunctionCallGraphBuilder::visitConstructor(
+	ContractDefinition const& _contract,
+	vector<ContractDefinition const*>::const_iterator _start,
+	vector<ContractDefinition const*>::const_iterator _end
+)
+{
+	if (_start != _end)
+		visitConstructor(**_start, _start + 1, _end);
 
 	for (auto const* stateVar: _contract.stateVariables())
 		stateVar->accept(*this);
 
 	if (_contract.constructor())
+	{
+		m_graph->edges.emplace(m_currentNode, _contract.constructor());
 		_contract.constructor()->accept(*this);
-
-	m_currentNode = previousNode;
+	}
 }
 
 }

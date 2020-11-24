@@ -31,6 +31,9 @@ using namespace solidity::frontend;
 
 string MultiUseYulFunctionCollector::requestedFunctions(std::set<std::string>* _names)
 {
+	if (_names)
+		_names->clear();
+
 	string result;
 	for (auto const& f: m_requestedFunctions)
 	{
